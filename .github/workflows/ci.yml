@@ -27,3 +27,65 @@ jobs:
       - run: pnpm format:check
       - run: pnpm --filter @openpactprotocol/provider build
       - run: pnpm --filter @openpactprotocol/personal-agent-client build
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PA_ISSUER: http://localhost:3002
+      PROVIDER_URL: http://localhost:3000
+      A2A_AUDIENCE: http://localhost:3000/a2a
+      PA_AUDIENCE: http://localhost:3000/a2a
+      CUSTOMER_ID: 01M3R53Q5SZQ6FQSMSDBSSREAA
+      OTHER_CUSTOMER_ID: 01M3R53Q5WKZ7A0GY4PZ8Y39TB
+      DELEGATION_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm gen-keys
+      - run: pnpm --filter @openpactprotocol/provider db:migrate
+      - run: pnpm --filter @openpactprotocol/provider db:seed
+      # nohup with redirected output, not a bare `&`: a backgrounded step that keeps
+      # stdout open can hang the step. The logs are also what makes a CI failure here
+      # diagnosable rather than mysterious.
+      - name: Start the demo personal agent's JWKS server
+        run: nohup pnpm --filter @openpactprotocol/personal-agent-server dev > /tmp/jwks.log 2>&1 &
+      - name: Start the example Brand app
+        run: nohup pnpm --filter @openpactprotocol/brand dev > /tmp/brand.log 2>&1 &
+      - name: Start the Provider
+        run: nohup pnpm --filter @openpactprotocol/provider dev > /tmp/provider.log 2>&1 &
+      - name: Wait for the Agent Card
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "$PROVIDER_URL/a2a/$CUSTOMER_ID/.well-known/agent-card.json" \
+                 | grep -q deviceCode; then
+              echo "Provider ready, delegation advertised"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Provider did not become ready"
+          exit 1
+      - run: pnpm e2e
+      - name: Service logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/provider.log /tmp/jwks.log /tmp/brand.log || true
