@@ -426,6 +426,12 @@ describe.sequential("PACT A2A HTTP+JSON E2E", () => {
     });
     expect(expired.status).toBe(401);
 
+    // Spec §3.2: exp MUST be at most 300 s after iat.
+    const tooLongLived = await rawRequest("tasks", {
+      token: await signedToken({ iat: now, exp: now + 301 }),
+    });
+    expect(tooLongLived.status).toBe(401);
+
     const disabled = await rawRequest("tasks", { issuer: `${issuer}/disabled-pa` });
     expect(disabled.status).toBe(401);
 
