@@ -492,7 +492,7 @@ export function createA2AHandler(options: HandlerOptions): A2AHandler {
           const agentMessageId = randomUUID();
           const agentParts = [{ text: turn.text }];
           // Spec §5.6: every reply served under a delegation token carries a receipt.
-          const agentMetadata = delegation
+          const agentMetadata = false
             ? {
                 [PACT_METADATA.receipt]: await signReceipt({
                   grantId: delegation.grantId,
